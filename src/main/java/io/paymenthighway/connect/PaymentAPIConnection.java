@@ -1,7 +1,7 @@
 package io.paymenthighway.connect;
 
 import io.paymenthighway.PaymentHighwayUtility;
-import io.paymenthighway.exception.AuthenticationException;
+import io.paymenthighway.exception.ErrorResponseException;
 import io.paymenthighway.json.JsonGenerator;
 import io.paymenthighway.json.JsonParser;
 import io.paymenthighway.model.request.*;
@@ -9,7 +9,6 @@ import io.paymenthighway.model.response.*;
 import io.paymenthighway.model.response.transaction.DebitTransactionResponse;
 import io.paymenthighway.security.SecureSigner;
 import org.apache.http.NameValuePair;
-import org.apache.http.client.HttpResponseException;
 import org.apache.http.client.ResponseHandler;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
@@ -42,6 +41,7 @@ public class PaymentAPIConnection implements Closeable {
   private String signatureSecret = null;
   private String account = null;
   private String merchant = null;
+  private boolean checkResponseStatus = false;
 
   private CloseableHttpClient httpclient;
 
@@ -55,12 +55,21 @@ public class PaymentAPIConnection implements Closeable {
    * @param signatureSecret
    */
   public PaymentAPIConnection(String serviceUrl, String signatureKeyId, String signatureSecret, String account, String merchant) {
-
     this.serviceUrl = serviceUrl;
     this.signatureKeyId = signatureKeyId;
     this.signatureSecret = signatureSecret;
     this.account = account;
     this.merchant = merchant;
+  }
+
+  /**
+   * Set whether or not to ensure that the result code of API responses are "100". By default no checks are made.
+   *
+   * @param checkResponseStatus If true then the result code of each API response is checked and if
+   *                            not "100" then an {@link ErrorResponseException} is thrown.
+   */
+  public void setCheckResponseStatus(boolean checkResponseStatus) {
+    this.checkResponseStatus = checkResponseStatus;
   }
 
   public void setHttpClient(CloseableHttpClient httpClient) {
@@ -73,8 +82,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executePost(paymentUri, createNameValuePairs());
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, InitTransactionResponse.class);
+    return mapResponse(response, InitTransactionResponse.class);
   }
 
   public DebitTransactionResponse debitTransaction(UUID transactionId, TransactionRequest request) throws IOException {
@@ -85,8 +93,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executePost(debitUri, createNameValuePairs(), request);
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, DebitTransactionResponse.class);
+    return mapResponse(response, DebitTransactionResponse.class);
   }
 
   public TransactionResponse creditTransaction(UUID transactionId, TransactionRequest request) throws IOException {
@@ -97,8 +104,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executePost(creditUri, createNameValuePairs(), request);
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, TransactionResponse.class);
+    return mapResponse(response, TransactionResponse.class);
   }
 
   public TransactionResponse revertTransaction(UUID transactionId, RevertTransactionRequest request) throws IOException {
@@ -109,8 +115,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executePost(revertUri, createNameValuePairs(), request);
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, TransactionResponse.class);
+    return mapResponse(response, TransactionResponse.class);
   }
 
   public CommitTransactionResponse commitTransaction(UUID transactionId, CommitTransactionRequest request) throws IOException {
@@ -121,8 +126,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executePost(commitUri, createNameValuePairs(), request);
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, CommitTransactionResponse.class);
+    return mapResponse(response, CommitTransactionResponse.class);
   }
 
   public TransactionResultResponse transactionResult(UUID transactionId) throws IOException {
@@ -133,8 +137,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executeGet(transactionResultUrl, createNameValuePairs());
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, TransactionResultResponse.class);
+    return mapResponse(response, TransactionResultResponse.class);
   }
 
   public TransactionStatusResponse transactionStatus(UUID transactionId) throws IOException {
@@ -145,8 +148,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executeGet(statusUri, createNameValuePairs());
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, TransactionStatusResponse.class);
+    return mapResponse(response, TransactionStatusResponse.class);
   }
 
   public OrderSearchResponse searchOrders(String order) throws IOException {
@@ -157,8 +159,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executeGet(searchUri, createNameValuePairs());
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, OrderSearchResponse.class);
+    return mapResponse(response, OrderSearchResponse.class);
   }
 
   public TokenizationResponse tokenization(UUID tokenizationId) throws IOException {
@@ -169,8 +170,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executeGet(tokenUri, createNameValuePairs());
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, TokenizationResponse.class);
+    return mapResponse(response, TokenizationResponse.class);
   }
 
   public ReportResponse fetchReport(String date) throws IOException {
@@ -181,8 +181,7 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executeGet(fetchUri, createNameValuePairs());
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, ReportResponse.class);
+    return mapResponse(response, ReportResponse.class);
   }
 
   public ReconciliationReportResponse fetchReconciliationReport(String date) throws IOException {
@@ -198,21 +197,20 @@ public class PaymentAPIConnection implements Closeable {
 
     String response = executeGet(fetchUri, createNameValuePairs());
 
-    JsonParser jpar = new JsonParser();
-    return jpar.mapResponse(response, ReconciliationReportResponse.class);
+    return mapResponse(response, ReconciliationReportResponse.class);
   }
 
   protected String executeGet(String requestUri, List<NameValuePair> nameValuePairs) throws IOException {
     CloseableHttpClient httpclient = returnHttpClients();
 
-    SecureSigner ss = new SecureSigner(this.signatureKeyId, this.signatureSecret);
+    SecureSigner ss = new SecureSigner(signatureKeyId, signatureSecret);
 
-    HttpRequestBase httpRequest = new HttpGet(this.serviceUrl + requestUri);
+    HttpRequestBase httpRequest = new HttpGet(serviceUrl + requestUri);
 
-    String signature = this.createSignature(ss, METHOD_GET, requestUri, nameValuePairs, null);
+    String signature = createSignature(ss, METHOD_GET, requestUri, nameValuePairs, null);
     nameValuePairs.add(new BasicNameValuePair("signature", signature));
 
-    this.addHeaders(httpRequest, nameValuePairs);
+    addHeaders(httpRequest, nameValuePairs);
 
     ResponseHandler<String> responseHandler = new PaymentHighwayResponseHandler(ss, METHOD_GET, requestUri);
 
@@ -222,17 +220,17 @@ public class PaymentAPIConnection implements Closeable {
   protected String executePost(String requestUri, List<NameValuePair> nameValuePairs, Request requestBody) throws IOException {
     CloseableHttpClient httpclient = returnHttpClients();
 
-    SecureSigner ss = new SecureSigner(this.signatureKeyId, this.signatureSecret);
+    SecureSigner ss = new SecureSigner(signatureKeyId, signatureSecret);
 
-    HttpPost httpRequest = new HttpPost(this.serviceUrl + requestUri);
+    HttpPost httpRequest = new HttpPost(serviceUrl + requestUri);
 
-    String signature = this.createSignature(ss, METHOD_POST, requestUri, nameValuePairs, requestBody);
+    String signature = createSignature(ss, METHOD_POST, requestUri, nameValuePairs, requestBody);
     nameValuePairs.add(new BasicNameValuePair("signature", signature));
 
-    this.addHeaders(httpRequest, nameValuePairs);
+    addHeaders(httpRequest, nameValuePairs);
 
     if (requestBody != null) {
-      this.addBody(httpRequest, requestBody);
+      addBody(httpRequest, requestBody);
     }
 
     ResponseHandler<String> responseHandler = new PaymentHighwayResponseHandler(ss, METHOD_POST, requestUri);
@@ -263,7 +261,6 @@ public class PaymentAPIConnection implements Closeable {
   }
 
   private String createSignature(SecureSigner ss, String method, String uri, List<NameValuePair> nameValuePairs, Request request) {
-
     String json = "";
     if (request != null) {
       JsonGenerator jsonGenerator = new JsonGenerator();
@@ -280,8 +277,8 @@ public class PaymentAPIConnection implements Closeable {
   private List<NameValuePair> createNameValuePairs() {
     List<NameValuePair> nameValuePairs = new ArrayList<>();
     nameValuePairs.add(new BasicNameValuePair("sph-api-version", SPH_API_VERSION));
-    nameValuePairs.add(new BasicNameValuePair("sph-account", this.account));
-    nameValuePairs.add(new BasicNameValuePair("sph-merchant", this.merchant));
+    nameValuePairs.add(new BasicNameValuePair("sph-account", account));
+    nameValuePairs.add(new BasicNameValuePair("sph-merchant", merchant));
     nameValuePairs.add(new BasicNameValuePair("sph-timestamp", PaymentHighwayUtility.getUtcTimestamp()));
     nameValuePairs.add(new BasicNameValuePair("sph-request-id", PaymentHighwayUtility.createRequestId()));
     return nameValuePairs;
@@ -301,4 +298,25 @@ public class PaymentAPIConnection implements Closeable {
     }
   }
 
+  /**
+   * Parse the specified response JSON string.
+   *
+   * @param responseString a JSON response.
+   * @param clazz the resulting class.
+   * @return the parsed results.
+   */
+  private <T extends Response> T mapResponse(String responseString, Class<T> clazz) throws ErrorResponseException {
+    JsonParser jpar = new JsonParser();
+    T response = jpar.mapResponse(responseString, clazz);
+
+    if (checkResponseStatus) {
+      // verify that the response result has status code 100
+      Result result = response.getResult();
+      if (result==null || !"100".equals(result.getCode())) {
+        throw new ErrorResponseException(result);
+      }
+    }
+
+    return response;
+  }
 }

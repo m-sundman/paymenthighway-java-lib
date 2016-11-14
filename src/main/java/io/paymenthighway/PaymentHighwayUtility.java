@@ -4,6 +4,7 @@ import org.apache.http.NameValuePair;
 import org.apache.http.message.BasicNameValuePair;
 
 import java.io.*;
+import java.lang.reflect.Array;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
@@ -35,7 +36,7 @@ public class PaymentHighwayUtility {
   /**
    * Convert map to list of name value pairs.
    * @param map
-   * @return List<NameValuePair>
+   * @return a list with the specified key-value pairs.
    */
   public static List<NameValuePair> mapToList(final Map<String,String> map) {
     List<NameValuePair> pairs=new ArrayList<>();
@@ -43,6 +44,36 @@ public class PaymentHighwayUtility {
       pairs.add(new BasicNameValuePair(entry.getKey(),entry.getValue()));
     }
     return pairs;
+  }
+
+  /**
+   * Convert a request map to list of name value pairs.
+   * @param map a request parameter map. Can be a map of string to string, or a direct http request map (string to string array).
+   * @return a list with the specified key-value pairs.
+   */
+  public static List<NameValuePair> requestMapToList(final Map<String, ? extends Object> map) {
+    List<NameValuePair> pairs=new ArrayList<>();
+    for (Map.Entry<String, ? extends Object> entry : map.entrySet()) {
+      pairs.add(new BasicNameValuePair(entry.getKey(), unboxRequestValue(entry.getValue())));
+    }
+    return pairs;
+  }
+
+  /**
+   * Unbox a value that's either a string or an entry straight from an http request (and thus an array).
+   * @param value either a string or an array of strings (in which case only the 1st is used)
+   * @return the specified value turned into a string
+   */
+  private static String unboxRequestValue(Object value) {
+    if (value == null) return null;
+
+    // unbox the 1st value if it's an array
+    if (value.getClass().isArray()) {
+      if (Array.getLength(value) == 0) return null;
+      value = Array.get(value, 0);
+    }
+
+    return value.toString();
   }
 
   /**

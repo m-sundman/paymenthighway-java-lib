@@ -2,6 +2,7 @@ package io.paymenthighway;
 
 import io.paymenthighway.connect.PaymentAPIConnection;
 import io.paymenthighway.exception.AuthenticationException;
+import io.paymenthighway.exception.ErrorResponseException;
 import io.paymenthighway.model.request.CommitTransactionRequest;
 import io.paymenthighway.model.request.RevertTransactionRequest;
 import io.paymenthighway.model.request.TransactionRequest;
@@ -17,15 +18,23 @@ import java.util.UUID;
  * Payment Highway Payment API Service.
  */
 public class PaymentAPI implements Closeable {
-
   /*
    * These need to be defined
    */
   private PaymentAPIConnection paymentApi = null;
 
   public PaymentAPI(String serviceUrl, String signatureKeyId, String signatureSecret, String account, String merchant) {
-
     paymentApi = new PaymentAPIConnection(serviceUrl, signatureKeyId, signatureSecret, account, merchant);
+  }
+
+  /**
+   * Set whether or not to ensure that the result code of API responses are "100". By default no checks are made.
+   *
+   * @param checkResponseStatus If true then the result code of each API response is checked and if
+   *                            not "100" then an {@link ErrorResponseException} is thrown.
+   */
+  public void setCheckResponseStatus(boolean checkResponseStatus) {
+    paymentApi.setCheckResponseStatus(checkResponseStatus);
   }
 
   public void setHttpClient(CloseableHttpClient httpClient) {
